@@ -1,6 +1,7 @@
 package com.example.demo.controller;
 
 import com.example.demo.entity.Product;
+import com.example.demo.parameter.ProductQueryParameter;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -9,20 +10,17 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import javax.annotation.PostConstruct;
 import java.net.URI;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping(produces = MediaType.APPLICATION_JSON_VALUE)
-@SuppressWarnings({"unchecked","rawtypes"})
+@RequestMapping(value = "/products", produces = MediaType.APPLICATION_JSON_VALUE)
 public class ProductController {
 
-    // 暫存資料
-    private final List<Product>  productDB = new ArrayList();
+    private final List<Product> productDB = new ArrayList<>();
 
     @PostConstruct
-    private void initDB(){
+    private void initDB() {
         productDB.add(new Product("B0001", "Android Development (Java)", 380));
         productDB.add(new Product("B0002", "Android Development (Kotlin)", 420));
         productDB.add(new Product("B0003", "Data Structure (Java)", 250));
@@ -30,21 +28,35 @@ public class ProductController {
         productDB.add(new Product("B0005", "Human Resource Management", 330));
     }
 
-    @GetMapping("/products/{id}")
-    public ResponseEntity<Object> getProduct(@PathVariable("id") String id){
-        Optional<Product> productOp = productDB.stream().filter(p->p.getId().equals(id)).findFirst();
-        if (productOp.isPresent()){
+    @GetMapping("/{id}")
+    public ResponseEntity<Product> getProduct(@PathVariable("id") String id) {
+        Optional<Product> productOp = productDB.stream()
+                .filter(p -> p.getId().equals(id))
+                .findFirst();
+
+        if (productOp.isPresent()) {
             Product product = productOp.get();
             return ResponseEntity.ok().body(product);
-        }else{
+        } else {
             return ResponseEntity.notFound().build();
         }
     }
 
-    @PostMapping("/products")
-    public ResponseEntity<Product> createProduct(@RequestBody Product request){
-        boolean isIdDuplicated = productDB.stream()
-                .anyMatch(p -> p.getId().equals(request.getId()));
+    @GetMapping
+    public ResponseEntity<List<Product>> getProducts(@ModelAttribute ProductQueryParameter param) {
+        String keyword = param.getKeyword();
+        String orderBy = param.getOrderBy();
+        String sortRule = param.getSortRule();
+        Comparator<Product> comparator = genSortComparator(orderBy, sortRule);
+
+        List<Product> products = productDB.stream().filter(p -> p.getName().toUpperCase().contains(keyword.toUpperCase())).sorted(comparator).collect(Collectors.toList());
+
+        return ResponseEntity.ok().body(products);
+    }
+
+    @PostMapping
+    public ResponseEntity<Product> createProduct(@RequestBody Product request) {
+        boolean isIdDuplicated = productDB.stream().anyMatch(p -> p.getId().equals(request.getId()));
         if (isIdDuplicated) {
             return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).build();
         }
@@ -54,8 +66,46 @@ public class ProductController {
         product.setName(request.getName());
         product.setPrice(request.getPrice());
         productDB.add(product);
-        URI location = ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}").buildAndExpand(product.getId()).toUri();
 
+        URI location = ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}").buildAndExpand(product.getId()).toUri();
         return ResponseEntity.created(location).body(product);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<Product> replaceProduct(
+            @PathVariable("id") String id, @RequestBody Product request) {
+        Optional<Product> productOp = productDB.stream().filter(p -> p.getId().equals(id)).findFirst();
+
+        if (productOp.isPresent()) {
+            Product product = productOp.get();
+            product.setName(request.getName());
+            product.setPrice(request.getPrice());
+
+            return ResponseEntity.ok().body(product);
+        } else {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable("id") String id) {
+        boolean isRemoved = productDB.removeIf(p -> p.getId().equals(id));
+
+        return isRemoved? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    }
+
+    private Comparator<Product> genSortComparator(String orderBy, String sortRule) {
+        Comparator<Product> comparator = (p1, p2) -> 0;
+        if (Objects.isNull(orderBy) || Objects.isNull(sortRule)) {
+            return comparator;
+        }
+
+        if (orderBy.equalsIgnoreCase("price")) {
+            comparator = Comparator.comparing(Product::getPrice);
+        } else if (orderBy.equalsIgnoreCase("name")) {
+            comparator = Comparator.comparing(Product::getName);
+        }
+
+        return sortRule.equalsIgnoreCase("desc") ? comparator.reversed() : comparator;
     }
 }
